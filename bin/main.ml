@@ -143,17 +143,19 @@ let main () =
     El.set_at (Jstr.v "max") (Some (Jstr.v "255")) slider;
     El.set_at (Jstr.v "value") (Some (Jstr.v "128")) slider;
     let evt =
-      Evr.on_el Ev.input (fun _ ->
+      Evr.on_el Ev.input
+        (fun _ ->
           match
             float_of_string_opt (Jstr.to_string (El.prop El.Prop.value slider))
           with
           | Some f -> Some (BrushColor f)
           | None -> None)
+        slider
     in
     (E.filter_map Fun.id evt, slider)
   in
 
-  let slider_actions, mk_slider = mk_slider () in
+  let slider_actions, slider = mk_slider () in
 
   let controls =
     El.div ~at:[]
@@ -161,6 +163,7 @@ let main () =
         mk_button "Clear" Clear;
         mk_button "DFT" (Set_mode Dft);
         mk_button "NTT" (Set_mode Ntt);
+        slider;
       ]
   in
 
