@@ -48,7 +48,7 @@ let apply (a : action) (m : model) : model =
       { m with pixels = p }
   | Clear -> { m with pixels = Array.make (m.n * m.n) 0.0 }
   | Set_mode md -> { m with mode = md }
-  | BrushColor f -> { m with brush_color = f *. 0.0 }
+  | BrushColor f -> { m with brush_color = f /. 255.0 }
 
 (* ---------- transforms (pure) ---------- *)
 
@@ -136,29 +136,24 @@ let main () =
     b
   in
 
-  let mk_slider : El.t =
+  let mk_slider () =
     let slider = El.input () in
     El.set_at (Jstr.v "type") (Some (Jstr.v "range")) slider;
     El.set_at (Jstr.v "min") (Some (Jstr.v "0")) slider;
     El.set_at (Jstr.v "max") (Some (Jstr.v "255")) slider;
     El.set_at (Jstr.v "value") (Some (Jstr.v "128")) slider;
-    (* Option.iter Logr.hold
-      (E.log (Evr.on_el Ev.drag (fun aa -> a) slider) send); *)
-    let _on_input ev =
-      let val_str = El.prop El.Prop.value slider in
-      (* Convert the string representation back to float safely *)
-      match float_of_string_opt (Jstr.to_string val_str) with
-      | None -> ()
-      | Some f ->
-          Option.iter Logr.hold
-            (E.log (ev Ev.input (fun _ -> BrushColor f) slider) send);
-          Console.(log [ Jstr.v "new slider value: "; f ])
-      (* Example: Dispatch or handle the action here *)
+    let evt =
+      Evr.on_el Ev.input (fun _ ->
+          match
+            float_of_string_opt (Jstr.to_string (El.prop El.Prop.value slider))
+          with
+          | Some f -> Some (BrushColor f)
+          | None -> None)
     in
-    (* let target = El.as_target slider in *)
-    (* ignore (Ev.listen Ev.input on_input target); *)
-    slider
+    (E.filter_map Fun.id evt, slider)
   in
+
+  let slider_actions, mk_slider = mk_slider () in
 
   let controls =
     El.div ~at:[]
@@ -166,7 +161,6 @@ let main () =
         mk_button "Clear" Clear;
         mk_button "DFT" (Set_mode Dft);
         mk_button "NTT" (Set_mode Ntt);
-        mk_slider;
       ]
   in
 
@@ -187,7 +181,7 @@ let main () =
   let moves =
     E.filter_map (function Some c -> Some (Draw c) | None -> None) moves
   in
-  let actions = E.select [ actions; moves ] in
+  let actions = E.select [ actions; moves; slider_actions ] in
 
   (* the reactive system: one signal, one pure update *)
   let model = S.accum (empty_model n) (E.map apply actions) in
