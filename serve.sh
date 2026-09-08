@@ -1,5 +1,6 @@
 #!/bin/sh
 # Build (if needed), copy the jsoo output where index.html expects it, serve.
+rm -f bin/main.bc.js
 set -e
 dune build
 mkdir -p bin

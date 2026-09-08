@@ -16,46 +16,10 @@ open Note_brr
 
 (* ---------- model ---------- *)
 
-type mode = Dft | Ntt
-
-type model = {
-  n : int; (* grid size *)
-  pixels :
-    float array (* n*n grayscale in [0,1]; replaced, never mutated in place *);
-  brush_color : float;
-  mode : mode;
-}
-
-let idx m i j = (i * m.n) + j
-
-let empty_model n =
-  { n; pixels = Array.make (n * n) 0.0; brush_color = 127.; mode = Dft }
-
-(* ---------- actions ---------- *)
-
-type action =
-  | Draw of (int * int)
-  | Clear
-  | Set_mode of mode
-  | BrushColor of float
-
-(* the single update function — pure *)
-let apply (a : action) (m : model) : model =
-  match a with
-  | Draw (i, j) ->
-      let p = Array.copy m.pixels in
-      p.(idx m i j) <- m.brush_color;
-      { m with pixels = p }
-  | Clear -> { m with pixels = Array.make (m.n * m.n) 0.0 }
-  | Set_mode md -> { m with mode = md }
-  | BrushColor f -> { m with brush_color = f /. 255.0 }
-
-(* ---------- transforms (pure) ---------- *)
-
-let compute_dft (m : model) : float array =
+let compute_dft (n : int) (m : float array) : float array =
   let x =
-    Fourier.Dft.make m.n m.n (fun i j ->
-        let v = m.pixels.(idx m i j) in
+    Fourier.Dft.make n n (fun i j ->
+        let v = m.((i * n) + j) in
         (* bind outside: Complex.{..} opens
                                            the Complex module, whose value [i]
                                            (imaginary unit!) would shadow the
@@ -64,25 +28,86 @@ let compute_dft (m : model) : float array =
   in
   Fourier.Dft.magnitudes (Fourier.Dft.dft2d x)
 
-let compute_ntt (m : model) : float array =
+let compute_ntt (n : int) (m : float array) : float array =
   let p = 257L and root = 93L in
   let x =
-    Fourier.Ntt.make m.n m.n (fun i j ->
-        Int64.of_int
-          (Float.to_int (Float.round (m.pixels.(idx m i j) *. 255.0))))
+    Fourier.Ntt.make n n (fun i j ->
+        Int64.of_int (Float.to_int (Float.round (m.((i * n) + j) *. 255.0))))
   in
-  let w = Fourier.Ntt.ntt_matrix m.n root p in
+  let w = Fourier.Ntt.ntt_matrix n root p in
   Fourier.Ntt.to_doubles (Fourier.Ntt.ntt2d x w) p
+
+type mode = Dft | Ntt
+
+type model = {
+  n : int; (* grid size *)
+  pixels :
+    float array (* n*n grayscale in [0,1]; replaced, never mutated in place *);
+  pixels_transformed : float array;
+  brush_color : float;
+  brush_size : int;
+  mode : mode;
+}
+
+let empty_model n =
+  let pixels = Array.make (n * n) 0.0 in
+  {
+    n;
+    pixels;
+    pixels_transformed = compute_dft n pixels;
+    brush_color = 127.;
+    brush_size = 1;
+    mode = Dft;
+  }
+
+(* ---------- actions ---------- *)
+
+type action =
+  | Draw of (int * int)
+  | Clear
+  | Transform
+  | Set_mode of mode
+  | BrushColor of float
+  | BrushSize of int
+
+(* the single update function — pure *)
+let apply (a : action) (m : model) : model =
+  match a with
+  | Draw (i, j) ->
+      let p = Array.copy m.pixels in
+      let () =
+        for ii = -m.brush_size + 1 to m.brush_size do
+          let i_clamped = min m.n (max (i + ii) 0) in
+          for jj = -m.brush_size + 1 to m.brush_size do
+            let j_clamped = min m.n (max (j + jj) 0) in
+            p.((i_clamped * m.n) + j_clamped) <- m.brush_color
+          done
+        done
+      in
+      p.((i * m.n) + j) <- m.brush_color;
+      { m with pixels = p }
+  | Clear -> { m with pixels = Array.make (m.n * m.n) 0.0 }
+  | Transform ->
+      {
+        m with
+        pixels_transformed =
+          (match m.mode with
+          | Dft -> compute_dft m.n m.pixels
+          | Ntt -> compute_ntt m.n m.pixels);
+      }
+  | Set_mode md -> { m with mode = md }
+  | BrushColor f -> { m with brush_color = f /. 255.0 }
+  | BrushSize size -> { m with brush_size = size }
 
 (* ---------- rendering (pure read of the model) ---------- *)
 
 let draw_grid c m values =
   let cell = 24.0 in
-  C2d.set_fill_style c (C2d.color (Jstr.v "#101014"));
+  C2d.set_fill_style c (C2d.color (Jstr.v "#1010a0"));
   C2d.fill_rect c ~x:0. ~y:0. ~w:(float m.n *. cell) ~h:(float m.n *. cell);
   for i = 0 to m.n - 1 do
     for j = 0 to m.n - 1 do
-      let g = values.(idx m i j) in
+      let g = values.((i * m.n) + j) in
       let v = int_of_float (Float.max 0.0 (Float.min 255.0 (g *. 255.0))) in
       let col = Printf.sprintf "rgb(%d,%d,%d)" v v v in
       C2d.set_fill_style c (C2d.color (Jstr.v col));
@@ -97,8 +122,7 @@ let draw_grid c m values =
 
 let render m input_c out_c label =
   draw_grid input_c m m.pixels;
-  draw_grid out_c m
-    (match m.mode with Dft -> compute_dft m | Ntt -> compute_ntt m);
+  draw_grid out_c m m.pixels_transformed;
   El.set_children label
     [
       El.txt'
@@ -136,26 +160,32 @@ let main () =
     b
   in
 
-  let mk_slider () =
+  let mk_slider min max current mk_action =
     let slider = El.input () in
     El.set_at (Jstr.v "type") (Some (Jstr.v "range")) slider;
-    El.set_at (Jstr.v "min") (Some (Jstr.v "0")) slider;
-    El.set_at (Jstr.v "max") (Some (Jstr.v "255")) slider;
-    El.set_at (Jstr.v "value") (Some (Jstr.v "128")) slider;
+    El.set_at (Jstr.v "min") (Some (Jstr.of_float min)) slider;
+    El.set_at (Jstr.v "max") (Some (Jstr.of_float max)) slider;
+    El.set_at (Jstr.v "value") (Some (Jstr.of_float current)) slider;
     let evt =
       Evr.on_el Ev.input
         (fun _ ->
           match
             float_of_string_opt (Jstr.to_string (El.prop El.Prop.value slider))
           with
-          | Some f -> Some (BrushColor f)
+          | Some f -> Some (mk_action f)
           | None -> None)
         slider
     in
     (E.filter_map Fun.id evt, slider)
   in
 
-  let slider_actions, slider = mk_slider () in
+  let brush_color_actions, brush_color =
+    mk_slider 0.0 255.0 128.0 (fun f -> BrushColor f)
+  in
+
+  let brush_size_actions, brush_size =
+    mk_slider 1.0 5.0 1.0 (fun f -> BrushSize (int_of_float f))
+  in
 
   let controls =
     El.div ~at:[]
@@ -163,7 +193,8 @@ let main () =
         mk_button "Clear" Clear;
         mk_button "DFT" (Set_mode Dft);
         mk_button "NTT" (Set_mode Ntt);
-        slider;
+        brush_color;
+        brush_size;
       ]
   in
 
@@ -184,7 +215,12 @@ let main () =
   let moves =
     E.filter_map (function Some c -> Some (Draw c) | None -> None) moves
   in
-  let actions = E.select [ actions; moves; slider_actions ] in
+  let transforms = E.map (fun _ -> Transform) moves in
+
+  let actions =
+    E.select
+      [ actions; transforms; moves; brush_color_actions; brush_size_actions ]
+  in
 
   (* the reactive system: one signal, one pure update *)
   let model = S.accum (empty_model n) (E.map apply actions) in
