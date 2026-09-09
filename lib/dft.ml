@@ -3,7 +3,10 @@
 module M = Matrix.Make (Ring.Complex_ring)
 module N16 = M.Square (struct let n = 16 end)
 include M   (* re-export make/get/mul/transpose/t so callers stay short *)
-include N16 (* re-export zero/(+)/(*) as the 16x16 matrix ring *)
+(* the 16x16 matrix ring is exposed as a named module — including it here
+   would put matrix (+)/() in top scope and shadow the INT operators
+   used by dft_matrix's index arithmetic below *)
+module Ring16 = N16
 
 (* DFT matrix: W[j,k] = exp(-2*pi*i*j*k/N) *)
 let dft_matrix n =

@@ -83,12 +83,44 @@ let empty_model n =
     mode = Dft;
   }
 
+let transform m =
+  {
+    m with
+    pixels_transformed =
+      (match m.mode with
+      | Dft -> compute_dft m.n m.pixels
+      | Ntt -> compute_ntt m.n m.pixels);
+  }
+
+let inverse_transform m =
+  {
+    m with
+    pixels =
+      (match m.mode with
+      | Dft -> compute_idft m.n m.pixels_transformed
+      | Ntt -> compute_intt m.n m.pixels_transformed);
+  }
+
+let draw_on_grid i j m =
+  let p = Array.copy m.pixels in
+  let () =
+    for ii = -m.brush_size + 1 to m.brush_size - 1 do
+      let i_clamped = min (m.n - 1) (max (i + ii) 0) in
+      for jj = -m.brush_size + 1 to m.brush_size - 1 do
+        let j_clamped = min (m.n - 1) (max (j + jj) 0) in
+        p.((i_clamped * m.n) + j_clamped) <- m.brush_color
+      done
+    done
+  in
+  p.((i * m.n) + j) <- m.brush_color;
+  transform { m with pixels = p }
+
 (* ---------- actions ---------- *)
 
 type action =
   | Draw of (int * int)
   | Clear
-  | Transform
+  | Inverse
   | Set_mode of mode
   | BrushColor of float
   | BrushSize of int
@@ -96,42 +128,14 @@ type action =
 (* the single update function — pure *)
 let apply (a : action) (m : model) : model =
   match a with
-  | Draw (i, j) ->
-      let p = Array.copy m.pixels in
-      let () =
-        for ii = -m.brush_size + 1 to m.brush_size do
-          let i_clamped = min m.n (max (i + ii) 0) in
-          for jj = -m.brush_size + 1 to m.brush_size do
-            let j_clamped = min m.n (max (j + jj) 0) in
-            p.((i_clamped * m.n) + j_clamped) <- m.brush_color
-          done
-        done
-      in
-      p.((i * m.n) + j) <- m.brush_color;
-      { m with pixels = p }
-  | Clear -> { m with pixels = Array.make (m.n * m.n) 0.0 }
-  | Inverse ->
-      {
-        m with
-        pixels =
-          (match m.mode with
-          | Dft -> compute_idft m.n m.pixels_transformed
-          | Ntt -> compute_intt m.n m.pixels_transformed);
-        pixels_transformed = m.pixels; (* old image becomes the new spectrum *)
-      }
-  | Transform ->
-      {
-        m with
-        pixels_transformed =
-          (match m.mode with
-          | Dft -> compute_dft m.n m.pixels
-          | Ntt -> compute_ntt m.n m.pixels);
-      }
-  | Set_mode md -> { m with mode = md }
+  | Draw (i, j) -> draw_on_grid i j m
+  | Clear -> transform { m with pixels = Array.make (m.n * m.n) 0.0 }
+  | Inverse -> inverse_transform m
+  | Set_mode md -> transform { m with mode = md }
   | BrushColor f -> { m with brush_color = f /. 255.0 }
   | BrushSize size -> { m with brush_size = size }
 
-(* ---------- rendering (pure read of the model) ---------- *)
+(* ---------- rendering ---------- *)
 
 let draw_grid c m values =
   let cell = 24.0 in
@@ -248,11 +252,9 @@ let main () =
   let moves =
     E.filter_map (function Some c -> Some (Draw c) | None -> None) moves
   in
-  let transforms = E.map (fun _ -> Transform) moves in
 
   let actions =
-    E.select
-      [ actions; transforms; moves; brush_color_actions; brush_size_actions ]
+    E.select [ actions; moves; brush_color_actions; brush_size_actions ]
   in
 
   (* the reactive system: one signal, one pure update *)

@@ -1,7 +1,7 @@
 (* Matrix ring — generic over any base Ring.
 
    The analog of `impl Ring for Matrix<T>` in Rust: the matrix type
-   ITSELF satisfies the Ring signature (zero, (+), (*)), so matrices
+   ITSELF satisfies the Ring signature (zero, (+), ( * )), so matrices
    compose with the same operators as scalars:
 
      Z.(a + b * c)         (* matrix add / matrix multiply, in scope *)
@@ -13,7 +13,7 @@
    Subtlety: Ring.S requires [zero : t] with no size argument, but the
    zero matrix only exists for a given size. So the ring instance is
    the ring of n x n matrices for a FIXED n, provided by [Square]:
-   one ring per dimension, all compile-time. *) *)
+   one ring per dimension, all compile-time. *)
 
 module Make (R : Ring.S) = struct
   module Core = struct

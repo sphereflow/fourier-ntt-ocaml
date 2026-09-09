@@ -11,7 +11,10 @@ module N16 = M.Square (struct
 end)
 
 include M
-include N16
+
+(* the 16x16 matrix ring as a named module — including it would shadow
+   the int ( * ) operator used by ntt_matrix's index arithmetic *)
+module Ring16 = N16
 
 let rec mod_pow b e p =
   if e = 0L then 1L
@@ -21,8 +24,8 @@ let rec mod_pow b e p =
   else Int64.rem (Int64.mul b (mod_pow b (Int64.sub e 1L) p)) p
 
 (* NTT matrix: W[j,k] = root^(j*k) mod p *)
-let ntt_matrix (n : int) (root : int64) (p : int64) =
-  make (n : int) (n : int) @@ fun (j : int) (k : int) ->
+let ntt_matrix n root p =
+  make n n @@ fun j k ->
   let e = Int64.of_int (j * k mod n) in
   mod_pow root e p
 
