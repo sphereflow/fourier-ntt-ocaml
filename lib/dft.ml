@@ -1,7 +1,9 @@
 (* DFT over the complex ring — one instantiation of the generic matrix *)
 
 module M = Matrix.Make (Ring.Complex_ring)
+module N16 = M.Square (struct let n = 16 end)
 include M   (* re-export make/get/mul/transpose/t so callers stay short *)
+include N16 (* re-export zero/(+)/(*) as the 16x16 matrix ring *)
 
 (* DFT matrix: W[j,k] = exp(-2*pi*i*j*k/N) *)
 let dft_matrix n =

@@ -5,7 +5,13 @@ module Zp257 = Ring.Zp (struct
 end)
 
 module M = Matrix.Make (Zp257)
+
+module N16 = M.Square (struct
+  let n = 16
+end)
+
 include M
+include N16
 
 let rec mod_pow b e p =
   if e = 0L then 1L
@@ -15,8 +21,8 @@ let rec mod_pow b e p =
   else Int64.rem (Int64.mul b (mod_pow b (Int64.sub e 1L) p)) p
 
 (* NTT matrix: W[j,k] = root^(j*k) mod p *)
-let ntt_matrix n root p =
-  make n n @@ fun j k ->
+let ntt_matrix (n : int) (root : int64) (p : int64) =
+  make (n : int) (n : int) @@ fun (j : int) (k : int) ->
   let e = Int64.of_int (j * k mod n) in
   mod_pow root e p
 
@@ -34,6 +40,6 @@ let intt_matrix n root p =
 let intt2d y _w w_inv = mul w_inv (mul y (transpose w_inv))
 
 (* normalized for grayscale rendering *)
-let to_doubles (m : t) (p : int64) : float array =
+let to_doubles m p =
   let q = Int64.to_float p in
   Array.map (fun v -> Int64.to_float v /. q) m.data
